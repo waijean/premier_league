@@ -127,12 +127,19 @@ if __name__ == "__main__":
     goals_matches_df = matches_df.loc[
         ~((matches_df["Home Goals"] == 0) & (matches_df["Away Goals"] == 0))
     ]
-    goals_matches_df_grouped = goals_matches_df.groupby(["Wk", "Home", "Away"])
 
     # multithreading to speed up
+    goals_matches_df_grouped = goals_matches_df.groupby(["Wk", "Home", "Away"])
     threads = min(10, len(goals_matches_df))
     with ThreadPool(threads) as pool:
         # map results are ordered
         result = pool.map(_get_goals_df_from_scorebox, goals_matches_df_grouped)
     goals_df = pd.concat(result)
-    
+
+    # post processing
+    goals_df[["Player", "Time"]] = goals_df["Goals"].str.split("·").to_list()
+    goals_df["Player"] = goals_df["Player"].str.strip()
+    goals_df["Time"] = goals_df["Time"].str.strip()
+    goals_df.drop(columns="Goals", inplace=True)
+
+    goals_df.to_csv("1920PL_goals.csv", index=False)
