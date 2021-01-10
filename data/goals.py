@@ -42,43 +42,18 @@ def get_goals_df_from_shots(df, verbose=False):
     return goals_df
 
 
-def get_goals_df_from_scorebox(df, verbose=False):
+def get_goals_from_scorebox(soup, id: str, team: str) -> Tuple[List, List]:
     """
-    Get the goals df by extracting the scorebox.
+    Identify and scrape the score box for goals.
 
     Args:
-        df:
-        verbose: print the goals df to std out
+        soup:
+        id: A str of id used by fbref website to identify home team and away team
+        team: A str of team name
 
-    Returns:
+    Returns: A Tuple of two Lists (goals, squads).
 
     """
-    url = "https://fbref.com" + df["Match Report"].iloc[0]
-    soup = get_html_from_url(url)
-
-    total_home_goals = df["Home Goals"].iloc[0]
-    if total_home_goals != 0:
-        home_goals, home_squad = get_home_goals(df, soup)
-    else:
-        home_goals, home_squad = [], []
-
-    total_away_goals = df["Away Goals"].iloc[0]
-    if total_away_goals != 0:
-        away_goals, away_squad = get_away_goals(df, soup)
-    else:
-        away_goals, away_squad = get_away_goals(df, soup)
-
-    goals_df = pd.DataFrame({"Squad": home_squad + away_squad, "Goals": home_goals+away_goals})
-    if verbose:
-        print(goals_df)
-
-    assert (
-        len(goals_df) == total_home_goals + total_away_goals
-    ), f"URL: {url} Actual goals: {len(goals_df)}, Expected goals: {total_home_goals + total_away_goals}"
-    return goals_df
-
-
-def get_goals(df, soup, id:str, team_col:str)->Tuple[List, List]:
     event_home = soup.find("div", class_="event", id=id).find_all(
         "div", recursive=False
     )
@@ -94,13 +69,55 @@ def get_goals(df, soup, id:str, team_col:str)->Tuple[List, List]:
             ],
         )
     ]
-    team = df[team_col].iloc[0]
     squad = [team] * len(goals)
     return goals, squad
 
 
-get_home_goals = partial(get_goals, id="a", team_col="Home")
-get_away_goals = partial(get_goals, id="b", team_col="Away")
+get_home_goals = partial(get_goals_from_scorebox, id="a")
+get_away_goals = partial(get_goals_from_scorebox, id="b")
+
+
+def get_goals_df_from_scorebox(key:Tuple, df, verbose=False):
+    """
+    Get the goals df by extracting the scorebox.
+
+    Args:
+        key: Tuple of (week, home_team, away_team)
+        df: A single row DataFrame with columns ["Match Report", "Home Goals", "Away Goals"]
+        verbose: print the goals df to std out
+
+    Returns:
+
+    """
+    week, home_team, away_team = key
+    url = "https://fbref.com" + df["Match Report"].iloc[0]
+    soup = get_html_from_url(url)
+
+    total_home_goals = df["Home Goals"].iloc[0]
+    if total_home_goals != 0:
+        home_goals, home_squad = get_home_goals(soup, team=home_team)
+    else:
+        home_goals, home_squad = [], []
+
+    total_away_goals = df["Away Goals"].iloc[0]
+    if total_away_goals != 0:
+        away_goals, away_squad = get_away_goals(soup, team=away_team)
+    else:
+        away_goals, away_squad = [], []
+
+    goals_df = pd.DataFrame({"Squad": home_squad + away_squad, "Goals": home_goals+away_goals, "Week":week, "Home":home_team, "Away":away_team})
+    if verbose:
+        print(goals_df)
+
+    assert (
+        len(goals_df) == total_home_goals + total_away_goals
+    ), f"URL: {url} Actual goals: {len(goals_df)}, Expected goals: {total_home_goals + total_away_goals}"
+    return goals_df
+
+
+def _get_goals_df_from_scorebox(args:Tuple):
+    # Utility funciton to unpack Tuple into individual arguments
+    return get_goals_df_from_scorebox(*args)
 
 
 if __name__ == "__main__":
@@ -112,16 +129,10 @@ if __name__ == "__main__":
     ]
     goals_matches_df_grouped = goals_matches_df.groupby(["Wk", "Home", "Away"])
 
-
-    # normal version
-    # goals_df = goals_matches_df_grouped.apply(
-    #     get_goals_df_from_scorebox, verbose=True
-    # )
-
-    # multithreading version
-    # in case we have less than 10 matches
+    # multithreading to speed up
     threads = min(10, len(goals_matches_df))
-    pool = ThreadPool(threads)
-    # map results are ordered
-    result = pool.map(get_goals_df_from_scorebox, (group for name, group in goals_matches_df_grouped))
+    with ThreadPool(threads) as pool:
+        # map results are ordered
+        result = pool.map(_get_goals_df_from_scorebox, goals_matches_df_grouped)
     goals_df = pd.concat(result)
+    
