@@ -1,3 +1,7 @@
+from functools import partial
+from multiprocessing.pool import ThreadPool
+from typing import List, Tuple
+
 import pandas as pd
 
 import requests
@@ -54,52 +58,17 @@ def get_goals_df_from_scorebox(df, verbose=False):
 
     total_home_goals = df["Home Goals"].iloc[0]
     if total_home_goals != 0:
-        event_home = soup.find("div", class_="event", id="a").find_all(
-            "div", recursive=False
-        )
-        goals = [
-            event.get_text().replace("&rsquor", "")
-            for event in event_home
-            if event.find(
-                "div",
-                class_=[
-                    "event_icon goal",
-                    "event_icon own_goal",
-                    "event_icon penalty_goal",
-                ],
-            )
-        ]
-
-        home_team = df["Home"].iloc[0]
-        squad = [home_team] * len(goals)
+        home_goals, home_squad = get_home_goals(df, soup)
     else:
-        goals = []
-        squad = []
+        home_goals, home_squad = [], []
 
     total_away_goals = df["Away Goals"].iloc[0]
     if total_away_goals != 0:
-        event_away = soup.find("div", class_="event", id="b").find_all(
-            "div", recursive=False
-        )
-        away_goals = [
-            event.get_text().replace("&rsquor", "")
-            for event in event_away
-            if event.find(
-                "div",
-                class_=[
-                    "event_icon goal",
-                    "event_icon own_goal",
-                    "event_icon penalty_goal",
-                ],
-            )
-            is not None
-        ]
-        goals.extend(away_goals)
+        away_goals, away_squad = get_away_goals(df, soup)
+    else:
+        away_goals, away_squad = get_away_goals(df, soup)
 
-        away_team = df["Away"].iloc[0]
-        squad.extend([away_team] * len(away_goals))
-
-    goals_df = pd.DataFrame({"Squad": squad, "Goals": goals})
+    goals_df = pd.DataFrame({"Squad": home_squad + away_squad, "Goals": home_goals+away_goals})
     if verbose:
         print(goals_df)
 
@@ -109,6 +78,31 @@ def get_goals_df_from_scorebox(df, verbose=False):
     return goals_df
 
 
+def get_goals(df, soup, id:str, team_col:str)->Tuple[List, List]:
+    event_home = soup.find("div", class_="event", id=id).find_all(
+        "div", recursive=False
+    )
+    goals = [
+        event.get_text().replace("&rsquor", "")
+        for event in event_home
+        if event.find(
+            "div",
+            class_=[
+                "event_icon goal",
+                "event_icon own_goal",
+                "event_icon penalty_goal",
+            ],
+        )
+    ]
+    team = df[team_col].iloc[0]
+    squad = [team] * len(goals)
+    return goals, squad
+
+
+get_home_goals = partial(get_goals, id="a", team_col="Home")
+get_away_goals = partial(get_goals, id="b", team_col="Away")
+
+
 if __name__ == "__main__":
     matches_df = pd.read_csv("1920PL_matches.csv")
 
@@ -116,6 +110,18 @@ if __name__ == "__main__":
     goals_matches_df = matches_df.loc[
         ~((matches_df["Home Goals"] == 0) & (matches_df["Away Goals"] == 0))
     ]
-    goals_df = goals_matches_df.groupby(["Wk", "Home", "Away"]).apply(
-        get_goals_df_from_scorebox, verbose=True
-    )
+    goals_matches_df_grouped = goals_matches_df.groupby(["Wk", "Home", "Away"])
+
+
+    # normal version
+    # goals_df = goals_matches_df_grouped.apply(
+    #     get_goals_df_from_scorebox, verbose=True
+    # )
+
+    # multithreading version
+    # in case we have less than 10 matches
+    threads = min(10, len(goals_matches_df))
+    pool = ThreadPool(threads)
+    # map results are ordered
+    result = pool.map(get_goals_df_from_scorebox, (group for name, group in goals_matches_df_grouped))
+    goals_df = pd.concat(result)
