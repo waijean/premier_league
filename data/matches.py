@@ -1,8 +1,6 @@
 from selenium import webdriver
 from bs4 import BeautifulSoup
 
-from bs4 import Comment
-
 import pandas as pd
 
 # include the path to compatible ChromeDriver version
