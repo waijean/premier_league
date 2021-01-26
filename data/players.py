@@ -24,6 +24,33 @@ button.click()
 elem = driver.find_element_by_id("div_stats_defense")
 elem_html = elem.get_attribute("outerHTML")
 
-df = pd.read_html(str(elem_html), flavor="bs4")[0]
+soup = BeautifulSoup(elem_html, "html")
+table_html = soup.find('table')
+
+# manual way
+table_rows = table_html.find_all("tr")
+data = []
+for i, tr in enumerate(table_rows):
+    # add the rest of td tags           )
+    tds = tr.find_all('td')
+    # skip the last column
+    row = [td.text for td in tds[:-1]]
+
+    # add href if exist (to exclude header row and intermediate header row)
+    try:
+        link = tds[0].find(href=True)["href"]
+        row += [link]
+        data.append(row)
+    except (IndexError, TypeError):
+       print(f"Skipping row {i}")
+
+# first two rows are headers
+header_0_list = [[th.text] * int(th["colspan"]) for th in table_rows[0].find_all('th', colspan=True)]
+header_0 = [i for ls in header_0_list for i in ls] + [""]
+# skip the first and last column
+header_1 = [th.text for th in table_rows[1].find_all('th')][1:-1] + ["Player Link"]
+header = [h1 if not h0 else h0 + " " + h1 for h0, h1 in zip(header_0, header_1)]
+df = pd.DataFrame(data, columns=header)
+
 
 df.to_csv("defense_stats.csv", index=False)
